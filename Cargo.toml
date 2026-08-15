@@ -1,0 +1,61 @@
+[package]
+name = "mcpg-plugin-backend-duckdb"
+version = "0.1.0-alpha.15"
+license = "Apache-2.0"
+edition = "2024"
+description = """
+DuckDB embedded-OLAP backend binding plugin for mcpg. Runs an operator-fixed
+analytical SQL statement as MCP tools / resources — `?` placeholder values are
+CEL-computed from the tool arguments and bound as SQL parameters (never
+string-interpolated, so injection-safe). The engine is embedded (no server):
+queries run over local Parquet / CSV / files, and over S3 / HTTP via the
+optional `httpfs` extension when the operator enables external access. A
+read-only guard and an external-access default-deny guard fence the engine's
+filesystem / network reach. Complements the `sql` (Postgres/MySQL/SQLite),
+`mssql`, `oracle` and `snowflake` backends.
+"""
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+cdylib-export = []
+static-firstparty = []
+# Gates the heavier file-DB + external-access end-to-end suite so plain
+# `cargo test` stays fast. DuckDB is embedded, so this needs no external
+# service. Run:
+# `cargo test -p mcpg-plugin-backend-duckdb --features integration-tests`.
+integration-tests = []
+
+[dependencies]
+mcpg-plugin-protocol = { git = "https://github.com/mcpg-dev/mcpg-plugin-protocol", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
+mcpg-plugin-sdk      = { git = "https://github.com/mcpg-dev/mcpg-plugin-sdk", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13", features = ["static-firstparty"] }
+mcpg-plugin-host     = { git = "https://github.com/mcpg-dev/mcpg-plugin-host", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
+async-trait    = "0.1"
+base64         = "0.22"
+# CEL for computed query parameters (mirrors the sql/oracle/mssql backends).
+cel            = "0.13"
+chrono         = { version = "0.4", features = ["clock"] }
+# Lazy per-binding connection pool for FILE databases (mirrors the mssql / oracle
+# backends). The pool is built at register_profile but opens NO connection until
+# the first call. `:memory:` databases are NOT pooled — each call opens a fresh
+# ephemeral engine that init_sql re-seeds (see lib.rs / README).
+deadpool       = "0.13"
+metrics        = "0.24"
+# Embedded DuckDB (OLAP). `bundled` compiles DuckDB's vendored C++ via `cc`
+# (no system lib link) — the heavy multi-minute compile is expected, and it
+# keeps this crate in default-members (like the sql plugin's bundled sqlite).
+# The optional `httpfs` extension's TLS is DuckDB's own C/C++ crypto, loaded
+# at runtime via SQL INSTALL/LOAD — there is no openssl / native-tls Rust dep.
+duckdb         = { version = "1.4.4", features = ["bundled"] }
+serde          = { version = "1", features = ["derive"] }
+serde_json     = "1"
+tokio          = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time"] }
+tracing        = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+async-trait = "0.1"
+# File-DB + read_csv external-access integration test fixtures.
+tempfile = "3"

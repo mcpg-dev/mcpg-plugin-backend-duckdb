@@ -1,0 +1,58 @@
+schema: mcpg.dev/plugin/v1
+id: dev.mcpg.backend.duckdb
+name: DuckDB Binding
+license: Apache-2.0
+description: |
+  Runs an operator-fixed analytical SQL statement against an embedded DuckDB
+  (OLAP) engine and returns rows as JSON. The statement uses `?` positional
+  placeholders bound from `params` — an ordered list of CEL expressions
+  evaluated against the tool arguments. Values are bound as SQL parameters
+  (never string-interpolated), so caller input cannot alter the statement
+  (injection-safe). The engine is embedded (no server): queries run over a
+  `:memory:` database or a local file, over local Parquet / CSV, and over
+  S3 / HTTP via the optional `httpfs` extension when the operator enables
+  external access. A read-only keyword guard and an external-access
+  default-deny guard fence the engine's filesystem / network reach.
+
+  An `operation` knob selects what a binding does. `query` (default) runs the
+  operator-fixed `statement`. `list_tables` / `list_columns` are read-only
+  schema-discovery introspection over `information_schema` — every filter is
+  BOUND as a `?` parameter, never interpolated. `read_file` exposes DuckDB's
+  `read_parquet` / `read_csv_auto` table functions over an OPERATOR-CONFIGURED
+  path/glob (the path is config-origin only — never a caller argument — so a
+  caller can never redirect the read at an arbitrary file); it requires
+  `allow_external_access: true`.
+
+  A `resource_templates[]` binding (`surface: resource` with a `uri_template`
+  like `duckdb://orders/{id}`) may declare a per-`{id}` `read_query` — the
+  operator-fixed single-row read run on a `resources/read`. The gateway extracts
+  the template variables from the concrete URI and supplies each `{var}` as
+  `arguments.<var>`; the `read_query`'s `?` placeholders bind from the binding's
+  `params` CEL expressions, so the extracted value binds SERVER-SIDE as a query
+  parameter (never interpolated — injection-safe). It is read-only-guarded like
+  `statement`, and when set lets the binding omit `statement` entirely.
+
+  A second `watch_strategy` entity (kind `duckdb_poll`) lets a resource
+  subscribe to DuckDB changes by POLLING. Each watcher carries its own
+  connection (`database` path + the `read_only` / `allow_external_access`
+  guards + operator `init_sql` / `attach`) plus a read-only scalar high-water
+  `tracking_query` (e.g. `SELECT max(updated_at) FROM events`). The plugin
+  opens a short-lived connection and runs that query every `interval_ms`
+  (default 60000, floored at 250 ms) with a per-tick `timeout_ms` budget
+  (default 10000), and emits `notifications/resources/updated` whenever the
+  scalar advances past the previously-seen value (the first tick only
+  establishes the baseline, so a watcher never fires spuriously at startup).
+  The `tracking_query` is held to the same read-only keyword guard as the
+  backend statement. The watch is FILE-BACKED ONLY: a `:memory:` database (or
+  an absent / empty path) opens a fresh empty engine per connection, so it has
+  no external change source and is rejected at watch start; an empty or
+  non-read-only `tracking_query` is rejected too.
+class: backend
+runtime: native-cdylib-v1
+protocol_version: "1.0"
+# Local database/parquet file access is config-origin (the resolved `path`),
+# granted per-binding from the config like every other file-backed backend
+# (sqlite declares none) — the cdylib derives the precise FilesystemRead{paths}
+# at runtime, so it is not a static path-less grant here. `network_outbound`
+# covers the optional httpfs S3/HTTP reach.
+required_capabilities: [network_outbound]
