@@ -361,9 +361,9 @@ pub fn run_query_on_conn(
 
     // Column names are stable for the whole result set; capture them up front so
     // the immutable borrow they take does not collide with `rows.next()` below.
-    // After `query()` the statement has been executed, so `column_names()` is
-    // safe to call (it panics only before execution).
-    let columns: Vec<String> = rows.as_ref().map(|s| s.column_names()).unwrap_or_default();
+    // After `query()` the statement has been executed, so `column_names()` and
+    // `column_type()` are safe to call (they panic only before execution).
+    let (columns, null_typed) = rows.as_ref().map(result_columns).unwrap_or_default();
 
     let mut out = Vec::new();
     let mut truncated = false;
@@ -379,7 +379,7 @@ pub fn run_query_on_conn(
             // them. The cap is on materialised rows, not on the scan.
             continue;
         }
-        out.push(row_to_json(row, &columns));
+        out.push(row_to_json(row, &columns, &null_typed));
     }
 
     Ok(QueryOutcome {
@@ -389,16 +389,37 @@ pub fn run_query_on_conn(
     })
 }
 
+/// The result's column names, and which columns DuckDB types `NULL` (an
+/// untyped `NULL` literal, such as `SELECT NULL AS x`): every value of such a
+/// column is null, and some driver releases panic in `get_ref` on one.
+fn result_columns(stmt: &duckdb::Statement<'_>) -> (Vec<String>, Vec<bool>) {
+    let names = stmt.column_names();
+    let null_typed = (0..names.len())
+        .map(|i| {
+            matches!(
+                stmt.column_type(i),
+                duckdb::arrow::datatypes::DataType::Null
+            )
+        })
+        .collect();
+    (names, null_typed)
+}
+
 /// One row → `{ column: value, … }`, projected by the column's runtime
 /// [`ValueRef`]. Column names stay as the query reports them; duplicate names
-/// collapse (last wins) — alias them in the query. Never panics: any unknown /
-/// unconvertible value falls back to a string.
-fn row_to_json(row: &duckdb::Row<'_>, columns: &[String]) -> Value {
+/// collapse (last wins) — alias them in the query. Never panics: a `NULL`-typed
+/// column is null without a read, and any unknown / unconvertible value falls
+/// back to a string.
+fn row_to_json(row: &duckdb::Row<'_>, columns: &[String], null_typed: &[bool]) -> Value {
     let mut obj = Map::with_capacity(columns.len());
     for (i, name) in columns.iter().enumerate() {
-        let v = match row.get_ref(i) {
-            Ok(vr) => value_ref_to_json(vr),
-            Err(_) => Value::Null,
+        let v = if null_typed.get(i).copied().unwrap_or(false) {
+            Value::Null
+        } else {
+            match row.get_ref(i) {
+                Ok(vr) => value_ref_to_json(vr),
+                Err(_) => Value::Null,
+            }
         };
         obj.insert(name.clone(), v);
     }
@@ -589,9 +610,9 @@ mod tests {
             .unwrap();
         let values = vec![bind_value(&DuckBind::Int(2))];
         let mut rows = stmt.query(params_from_iter(values)).unwrap();
-        let columns: Vec<String> = rows.as_ref().unwrap().column_names();
+        let (columns, null_typed) = result_columns(rows.as_ref().unwrap());
         let row = rows.next().unwrap().expect("one row");
-        let json = row_to_json(row, &columns);
+        let json = row_to_json(row, &columns, &null_typed);
         assert_eq!(json, json!({ "id": 2, "name": "bob" }));
         assert!(rows.next().unwrap().is_none());
     }
