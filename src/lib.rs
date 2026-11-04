@@ -1121,6 +1121,7 @@ mod tests {
             session_id: None,
             identity: None,
             idempotency: None,
+            client: None,
         };
         let resp = plugin.execute(profile, req).await.expect("execute");
         serde_json::from_slice(&resp.payload).expect("envelope json")
@@ -1389,6 +1390,7 @@ mod tests {
             session_id: None,
             identity: None,
             idempotency: None,
+            client: None,
         };
         let err = plugin.execute("missing", req).await.expect_err("missing");
         assert!(matches!(err, BackendError::ProfileNotFound { .. }));
@@ -1416,6 +1418,7 @@ mod tests {
             session_id: None,
             identity: None,
             idempotency: None,
+            client: None,
         };
         let resp = plugin.execute("q", req).await.expect("execute");
         let env: Value = serde_json::from_slice(&resp.payload).expect("envelope json");
@@ -1461,6 +1464,7 @@ mod tests {
             session_id: None,
             identity: None,
             idempotency: None,
+            client: None,
         };
         let resp = plugin.execute("r", req).await.expect("execute");
         let body: Value = serde_json::from_slice(&resp.payload).expect("body json");
@@ -1491,6 +1495,7 @@ mod tests {
             session_id: None,
             identity: None,
             idempotency: None,
+            client: None,
         };
         let resp = plugin.execute("r", req).await.expect("execute");
         let body: Value = serde_json::from_slice(&resp.payload).expect("body json");
@@ -1517,6 +1522,7 @@ mod tests {
             session_id: None,
             identity: None,
             idempotency: None,
+            client: None,
         };
         let resp = plugin.execute("p", req).await.expect("execute");
         let body: Value = serde_json::from_slice(&resp.payload).expect("body json");
@@ -1545,6 +1551,7 @@ mod tests {
             session_id: None,
             identity: None,
             idempotency: None,
+            client: None,
         };
         let resp = plugin.execute("t", req).await.expect("execute");
         let env: Value = serde_json::from_slice(&resp.payload).expect("body json");
